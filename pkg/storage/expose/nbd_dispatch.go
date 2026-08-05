@@ -17,6 +17,7 @@ import (
 var ErrShuttingDown = errors.New("shutting down. Cannot serve any new requests")
 
 const dispatchBufferSize = 4 * 1024 * 1024
+const maxDispatchBufferSize = 128 * 1024 * 1024
 
 /**
  * Exposes a storage provider as an nbd device
@@ -232,6 +233,59 @@ func (d *Dispatch) Handle() error {
 	request := Request{}
 
 	for {
+		if wp == len(buffer) {
+			if wp < 28 {
+				return fmt.Errorf(
+					"NBD dispatch buffer full with incomplete header: bytes=%d",
+					wp,
+				)
+			}
+
+			if binary.BigEndian.Uint32(buffer[:4]) != NBDRequestMagic {
+				return fmt.Errorf("NBD dispatch buffer full with invalid request magic")
+			}
+
+			requestLength := int(binary.BigEndian.Uint32(buffer[24:28]))
+			required := 28 + requestLength
+
+			if required <= len(buffer) {
+				return fmt.Errorf(
+					"NBD dispatch made no progress: required=%d buffer=%d",
+					required,
+					len(buffer),
+				)
+			}
+
+			if required > maxDispatchBufferSize {
+				return fmt.Errorf(
+					"NBD request exceeds maximum supported size: payload=%d required=%d maximum=%d",
+					requestLength,
+					required,
+					maxDispatchBufferSize,
+				)
+			}
+
+			newSize := len(buffer) * 2
+			if newSize < required {
+				newSize = required
+			}
+			if newSize > maxDispatchBufferSize {
+				newSize = maxDispatchBufferSize
+			}
+
+			grown := make([]byte, newSize)
+			copy(grown, buffer[:wp])
+			buffer = grown
+
+			if d.logger != nil {
+				d.logger.Info().
+					Int("requestLength", requestLength).
+					Int("requiredBuffer", required).
+					Int("newBufferSize", newSize).
+					Msg("grew NBD dispatch buffer for large request")
+			}
+		}
+
 		n, err := d.fp.Read(buffer[wp:])
 		if err != nil {
 			return err
