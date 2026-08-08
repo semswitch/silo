@@ -23,7 +23,7 @@ const NBDMinSectors = 8
 const NBDAlignSectorSize = 512
 
 var DefaultConfig = &Config{
-	NumConnections: 8,
+	NumConnections: 1,
 	Timeout:        0,
 	BlockSize:      NBDDefaultBlockSize,
 	AsyncReads:     true,
