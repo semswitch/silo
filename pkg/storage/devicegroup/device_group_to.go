@@ -377,6 +377,7 @@ func (dg *DeviceGroup) GetMigrationProgress() map[string]*migrator.MigrationProg
 
 type MigrateDirtyHooks struct {
 	PreGetDirty      func(name string) (bool, error)
+	WaitWhenIdle     func(name string) error
 	PostGetDirty     func(name string, blocks []uint) (bool, error)
 	PostMigrateDirty func(name string, blocks []uint) (bool, error)
 	Completed        func(name string)
@@ -458,6 +459,11 @@ func (dg *DeviceGroup) MigrateDirty(hooks *MigrateDirtyHooks) error {
 						if !cont {
 							break
 						}
+					}
+				} else if hooks != nil && hooks.WaitWhenIdle != nil {
+					if err := hooks.WaitWhenIdle(d.Schema.Name); err != nil {
+						errs <- err
+						return
 					}
 				}
 			}
