@@ -93,6 +93,7 @@ type Dispatch struct {
 	metricWriteAtTime  uint64
 	metricActiveWrites int64
 	metricRequestSizes [4]uint64
+	metricRequestBytes [4]uint64
 }
 
 type DispatchMetrics struct {
@@ -107,6 +108,7 @@ type DispatchMetrics struct {
 	WriteAtTime  time.Duration
 	ActiveWrites uint64
 	RequestSizes map[string]uint64
+	RequestBytes map[string]uint64
 }
 
 func (dm *DispatchMetrics) Add(delta *DispatchMetrics) {
@@ -125,6 +127,12 @@ func (dm *DispatchMetrics) Add(delta *DispatchMetrics) {
 	}
 	for bucket, count := range delta.RequestSizes {
 		dm.RequestSizes[bucket] += count
+	}
+	if dm.RequestBytes == nil {
+		dm.RequestBytes = make(map[string]uint64)
+	}
+	for bucket, count := range delta.RequestBytes {
+		dm.RequestBytes[bucket] += count
 	}
 }
 
@@ -164,6 +172,12 @@ func (d *Dispatch) GetMetrics() *DispatchMetrics {
 			"le_64k": atomic.LoadUint64(&d.metricRequestSizes[2]),
 			"gt_64k": atomic.LoadUint64(&d.metricRequestSizes[3]),
 		},
+		RequestBytes: map[string]uint64{
+			"le_4k":  atomic.LoadUint64(&d.metricRequestBytes[0]),
+			"le_16k": atomic.LoadUint64(&d.metricRequestBytes[1]),
+			"le_64k": atomic.LoadUint64(&d.metricRequestBytes[2]),
+			"gt_64k": atomic.LoadUint64(&d.metricRequestBytes[3]),
+		},
 	}
 }
 
@@ -178,6 +192,7 @@ func (d *Dispatch) recordRequestSize(length uint32) {
 		index = 2
 	}
 	atomic.AddUint64(&d.metricRequestSizes[index], 1)
+	atomic.AddUint64(&d.metricRequestBytes[index], uint64(length))
 }
 
 func (d *Dispatch) Wait() {

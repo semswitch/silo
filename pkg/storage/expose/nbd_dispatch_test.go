@@ -195,6 +195,22 @@ func TestDispatchHandleWrites(t *testing.T) {
 	}
 }
 
+func TestDispatchRequestSizeMetricsIncludeBytes(t *testing.T) {
+	dispatch := &Dispatch{}
+	for _, length := range []uint32{4096, 8192, 65536, 131072} {
+		dispatch.recordRequestSize(length)
+	}
+	metrics := dispatch.GetMetrics()
+	for bucket, want := range map[string]uint64{
+		"le_4k": 4096, "le_16k": 8192, "le_64k": 65536, "gt_64k": 131072,
+	} {
+		if metrics.RequestSizes[bucket] != 1 || metrics.RequestBytes[bucket] != want {
+			t.Errorf("bucket %s = (%d requests, %d bytes), want (1, %d)",
+				bucket, metrics.RequestSizes[bucket], metrics.RequestBytes[bucket], want)
+		}
+	}
+}
+
 func TestDispatchHandleRejectsOversizedRequest(t *testing.T) {
 	header := nbdWriteRequest(1, 0, nil)
 	binary.BigEndian.PutUint32(header[24:28], uint32(maxDispatchBufferSize))
