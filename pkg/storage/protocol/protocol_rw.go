@@ -37,6 +37,7 @@ type RW struct {
 	newdevFn                   func(context.Context, Protocol, uint32)
 	newdevProtocol             Protocol
 	metricActivePacketsSending int64
+	metricMaxPacketsSending    int64
 	metricPacketsSent          uint64
 	metricDataSent             uint64
 	metricPacketsRecv          uint64
@@ -96,6 +97,7 @@ func NewRWWithBuffering(ctx context.Context, readers []io.Reader, writers []io.W
 
 type Metrics struct {
 	ActivePacketsSending uint64
+	MaxPacketsSending    uint64
 	PacketsSent          uint64
 	DataSent             uint64
 	UrgentPacketsSent    uint64
@@ -110,6 +112,7 @@ type Metrics struct {
 func (p *RW) GetMetrics() *Metrics {
 	return &Metrics{
 		ActivePacketsSending: uint64(atomic.LoadInt64(&p.metricActivePacketsSending)),
+		MaxPacketsSending:    uint64(atomic.LoadInt64(&p.metricMaxPacketsSending)),
 		PacketsSent:          atomic.LoadUint64(&p.metricPacketsSent),
 		DataSent:             atomic.LoadUint64(&p.metricDataSent),
 		PacketsRecv:          atomic.LoadUint64(&p.metricPacketsRecv),
@@ -147,7 +150,12 @@ func (p *RW) InitDev(dev uint32) {
 
 // Send a packet
 func (p *RW) SendPacket(dev uint32, id uint32, data []byte, urgency Urgency) (uint32, error) {
-	atomic.AddInt64(&p.metricActivePacketsSending, 1)
+	active := atomic.AddInt64(&p.metricActivePacketsSending, 1)
+	for maximum := atomic.LoadInt64(&p.metricMaxPacketsSending); active > maximum; maximum = atomic.LoadInt64(&p.metricMaxPacketsSending) {
+		if atomic.CompareAndSwapInt64(&p.metricMaxPacketsSending, maximum, active) {
+			break
+		}
+	}
 	defer atomic.AddInt64(&p.metricActivePacketsSending, -1)
 
 	// If the context was cancelled, we should return that error

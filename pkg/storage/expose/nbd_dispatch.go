@@ -92,6 +92,7 @@ type Dispatch struct {
 	metricWriteAtBytes uint64
 	metricWriteAtTime  uint64
 	metricActiveWrites int64
+	metricRequestSizes [4]uint64
 }
 
 type DispatchMetrics struct {
@@ -105,6 +106,7 @@ type DispatchMetrics struct {
 	WriteAtBytes uint64
 	WriteAtTime  time.Duration
 	ActiveWrites uint64
+	RequestSizes map[string]uint64
 }
 
 func (dm *DispatchMetrics) Add(delta *DispatchMetrics) {
@@ -118,6 +120,12 @@ func (dm *DispatchMetrics) Add(delta *DispatchMetrics) {
 	dm.WriteAtBytes += delta.WriteAtBytes
 	dm.WriteAtTime += delta.WriteAtTime
 	dm.ActiveWrites += delta.ActiveWrites
+	if dm.RequestSizes == nil {
+		dm.RequestSizes = make(map[string]uint64)
+	}
+	for bucket, count := range delta.RequestSizes {
+		dm.RequestSizes[bucket] += count
+	}
 }
 
 func NewDispatch(ctx context.Context, name string, logger types.Logger, fp io.ReadWriteCloser, prov storage.Provider) *Dispatch {
@@ -150,7 +158,26 @@ func (d *Dispatch) GetMetrics() *DispatchMetrics {
 		WriteAtBytes: atomic.LoadUint64(&d.metricWriteAtBytes),
 		WriteAtTime:  time.Duration(atomic.LoadUint64(&d.metricWriteAtTime)),
 		ActiveWrites: uint64(atomic.LoadInt64(&d.metricActiveWrites)),
+		RequestSizes: map[string]uint64{
+			"le_4k":  atomic.LoadUint64(&d.metricRequestSizes[0]),
+			"le_16k": atomic.LoadUint64(&d.metricRequestSizes[1]),
+			"le_64k": atomic.LoadUint64(&d.metricRequestSizes[2]),
+			"gt_64k": atomic.LoadUint64(&d.metricRequestSizes[3]),
+		},
 	}
+}
+
+func (d *Dispatch) recordRequestSize(length uint32) {
+	index := 3
+	switch {
+	case length <= 4*1024:
+		index = 0
+	case length <= 16*1024:
+		index = 1
+	case length <= 64*1024:
+		index = 2
+	}
+	atomic.AddUint64(&d.metricRequestSizes[index], 1)
 }
 
 func (d *Dispatch) Wait() {
@@ -342,6 +369,7 @@ func (d *Dispatch) Handle() error {
 				case NBDCmdRead:
 					rp += 28
 					d.metricPacketsIn++
+					d.recordRequestSize(request.Length)
 					err := d.cmdRead(request.Handle, request.From, request.Length)
 					if err != nil {
 						return err
@@ -353,6 +381,7 @@ func (d *Dispatch) Handle() error {
 						break process // We don't have enough data yet... Wait for next read
 					}
 					d.metricPacketsIn++
+					d.recordRequestSize(request.Length)
 					data := make([]byte, request.Length)
 					copy(data, buffer[rp:rp+int(request.Length)])
 					rp += int(request.Length)
@@ -363,6 +392,7 @@ func (d *Dispatch) Handle() error {
 				case NBDCmdTrim:
 					rp += 28
 					d.metricPacketsIn++
+					d.recordRequestSize(request.Length)
 					err = d.cmdTrim(request.Handle, request.From, request.Length)
 					if err != nil {
 						return err

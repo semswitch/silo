@@ -364,6 +364,17 @@ func (dg *DeviceGroup) MigrateAll(maxConcurrency int, progressHandler func(p map
 	return nil
 }
 
+func (dg *DeviceGroup) GetMigrationProgress() map[string]*migrator.MigrationProgress {
+	dg.progressLock.Lock()
+	defer dg.progressLock.Unlock()
+	progress := make(map[string]*migrator.MigrationProgress, len(dg.progress))
+	for name, current := range dg.progress {
+		copy := *current
+		progress[name] = &copy
+	}
+	return progress
+}
+
 type MigrateDirtyHooks struct {
 	PreGetDirty      func(name string) (bool, error)
 	PostGetDirty     func(name string, blocks []uint) (bool, error)
